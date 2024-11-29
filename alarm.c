@@ -6,23 +6,19 @@
 void music(int gpio)
 {
     softToneCreate(gpio);
-    for (int i = 0, i < 3; i++)
+    for (int i = 0; i < 3; i++)
     {
-        softToneWrite(gpio, 450);
-        delay(250);
+        softToneWrite(gpio, 900);
+        delay(333);
+        softToneWrite(gpio, 0);
+        delay(333);
     }
 }
 
 int main(int argc, char **argv)
 {
-    int gno;
-    if (argc < 2)
-    {
-        printf("Usage : %s Enter the duty\n", argv[0]);
-        return -1;
-    }
+
     wiringPiSetupGpio();
-    gno = atoi(argv[1]);
-    musicPlay(gno);
+    music(18);
     return 0;
 }
