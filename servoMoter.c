@@ -1,44 +1,120 @@
-//소프트웨어적으로 pwm 생성 -> 내부적으로 gpio를 thread로 제어, 따라서 컴파일시 -lpthread
-//gcc -o test test.c -lwiringPi -lpthread
-
 #include <wiringPi.h>
-#include <softPwm.h>
 #include <stdio.h>
-#include <stdlib.h>
 
-#define gpio_pins_num 3
-int gpio_pins[gpio_pins_num] = {17, 18, 27} //softpwm 설정용 gpio 핀 배열
+#define PWM0 13
 
-void softPwmControl(int gpio)
+// Step GPIO
+// IN1(12) ~ IN4(21)
+int pin_arr[4] = {12, 16, 20, 21};
+
+int one_phase[8][4] = {
+    {1, 0, 0, 0},
+    {1, 1, 0, 0},
+    {0, 1, 0, 0},
+    {0, 1, 1, 0},
+    {0, 0, 1, 0},
+    {0, 0, 1, 1},
+    {0, 0, 0, 1},
+    {1, 0, 0, 1},
+};
+
+void one_two_Phase_Rotate(int steps, int dir)
 {
-    pinMode(gpio, OUTPUT);         //Pin의 출력설정
-    softPwmCreate(gpio, 0, 200);   //range 200 
+    if (dir == 1)
+    {
+        for (int i = 0; i < steps; i++)
+        {
+            digitalWrite(pin_arr[0], one_phase[i % 8][0]);
+            digitalWrite(pin_arr[1], one_phase[i % 8][1]);
+            digitalWrite(pin_arr[2], one_phase[i % 8][2]);
+            digitalWrite(pin_arr[3], one_phase[i % 8][3]);
+            delay(2);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < steps; i++)
+        {
+            digitalWrite(pin_arr[0], one_phase[i % 8][3]);
+            digitalWrite(pin_arr[1], one_phase[i % 8][2]);
+            digitalWrite(pin_arr[2], one_phase[i % 8][1]);
+            digitalWrite(pin_arr[3], one_phase[i % 8][0]);
+            delay(2);
+        }
+    }
 }
 
-void rotate_Servo(int pwm_pin, float angle) {
-    float duty = 15 + (angle / 90.0) * 5;
-    
-    softPwmWrite(pwm_pin, pulse); //pulse는 10 ~ 20값(5% ~ 10%), 1ms ~ 2ms
+void one_two_Phase_Rotate_Angle(float angle, int dir)
+{
+    // 4096 이 한바퀴 1-2상 기준
+    int steps = angle * (4096 / 360);
+
+    one_two_Phase_Rotate(steps, dir);
 }
+
+void init_Step()
+{
+    // 4
+    for (int i = 0; i < 4; i++)
+    {
+        pinMode(pin_arr[i], OUTPUT);
+    }
+}
+
+
+/////////////////////////////////////////////////
+/////////////////////////////////////////////////
+//서보모터
+
+
+void rotate_Servo(float angle){
+    // printf("%d", angle);
+    float duty = 150 + (angle / 90) * 100;  //2.5% 7.5% 12.5%
+
+    pwmWrite(PWM0, (int)duty);
+}
+
 
 int main()
 {
-    wiringPiSetupGpio( );  //wiringPi 초기화
+    // printf("Stepping motor example\n");
+    wiringPiSetupGpio(); /* wiringPi */
+    
+    //스텝모터 gpio 설정
+    init_Step();
 
-    //softpwm 설정
-    for(int i=0;i < gpio_pins_num;i++){
-        softPwmControl(gpio_pins[i]);
+    //서보모터 설정
+    pinMode(PWM0, PWM_OUTPUT); 
+    pwmSetMode(PWM_MODE_MS);
+    pwmSetClock(192);
+    pwmSetRange(2000);
+    delay(100);
+
+    //서보모터 초기화
+    pwmWrite(PWM0, 150);
+
+
+    int moterSelect = 0;
+
+    int angle, dir;
+    while (1)
+    {
+        printf("모터 선택: ");
+        scanf("%d", &moterSelect);
+        
+        if(moterSelect == 0){
+            printf("angle: ");
+            scanf("%d", &angle);
+
+            if(angle <= 90 && angle >= -90){
+                rotate_Servo((float)angle);
+            }
+        }else if(moterSelect == 1){
+            printf("angle direction: ");
+            scanf("%d %d", &angle, &dir);
+            one_two_Phase_Rotate_Angle(angle, dir);
+        }
     }
-
-    int servo, angle;
-
-    while(1){
-        printf("서보모터(1,2,3)와 각도를 입력하시오. \n");
-        scanf("%d %d", &servo, &angle)
-
-        rotate_Servo(gpio_pins[servo], angle);
-        delay(500);  
-    };
 
     return 0;
 }
