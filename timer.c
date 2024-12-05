@@ -3,119 +3,137 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <time.h>
+#include <string.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <wiringPi.h>
 
-// 아래 4개 uart설정
-int min_time = 0;
-int max_time = 0;
-int first_time = 0; // 시,분 설정해야할듯?
-int max_count = 0;  // 하루 복용횟수
+extern char **environ;
 
+// 설정값들
+int min_time = 10; // 최소 대기 시간 (초 단위 예제용)
+int max_time = 60; // 최대 대기 시간 (초 단위 예제용)
+int first_time = 9; // 첫 복용 시간 (24시간 형식)
+int max_count = 3;  // 하루 복용 횟수 제한
+
+// 상태 변수들
 int today_count = 0;
-int total_count = 0;      // 필요한가...?
-int latest_take_time = 0; // 최근복용시간 근데 필요한가...? thread로 해결되는듯?
-
+int total_count = 0;      
 int flag = 0; // 공유 자원 약 복용 가능 여부 1: 가능 0: 불가능
 pthread_mutex_t mid;
 
-void *take_min(void *arg)
-{
-    sleep(min_time);            // 최소 시간 대기
-    pthread_mutex_lock(&mid);   // 뮤텍스 잠금
-    flag = 1;                   // 최소 시간이 지나서 먹을 수 있음
-    pthread_mutex_unlock(&mid); // 뮤텍스 잠금 해제
-    printf("알림take min\n");
+// NFC 태그 인식 결과 변수
+char nfc_detected_data[100] = "";
+
+// 타이머 함수들
+void *take_min(void *arg) {
+    sleep(min_time);
+    pthread_mutex_lock(&mid);
+    flag = 1;
+    pthread_mutex_unlock(&mid);
+    printf("알림: 최소 대기 시간 지나 복용 가능\n");
     return NULL;
 }
 
-void *take_max(void *arg)
-{
-    sleep(max_time); // 최대 시간 대기
-
+void *take_max(void *arg) {
+    sleep(max_time);
     pthread_mutex_lock(&mid);
-    if (flag == 1)
-    {
-        printf("알림take max\n");
-        // 알림 발생 함수 실행
+    if (flag == 1) {
+        printf("알림: 최대 대기 시간 도달\n");
     }
     pthread_mutex_unlock(&mid);
-
     return NULL;
 }
 
-void *first_take(void *arg)
-{
-    while (1)
-    {
+void *first_take(void *arg) {
+    while (1) {
         time_t now = time(NULL);
         struct tm *current_time = localtime(&now);
-
         pthread_mutex_lock(&mid);
-        if (current_time->tm_hour == first_time - 1 && flag == 1) // 첫 복용 시간에서 일정시간 (1시간) 전에 flag 활성화
-        {
-            pthread_mutex_lock(&mid);
+        if (current_time->tm_hour == first_time - 1 && flag == 0) {
             flag = 1;
-            pthread_mutex_unlock(&mid);
-            printf("하루의 시작, 복용 가능");
+            printf("알림: 하루 첫 복용 가능\n");
         }
-
-        if (current_time->tm_hour == first_time && flag == 1) // 첫 복용 시간 마지노 선 입갤
-        {
-            printf("첫 복용시간 마지노선 알림");
-            // 알림 함수
+        if (current_time->tm_hour == first_time && flag == 0) {
+            printf("알림: 하루 첫 복용 마감\n");
         }
         pthread_mutex_unlock(&mid);
-        sleep(60); // 1분마다 확인
+        sleep(60);
     }
     return NULL;
 }
 
-void timer()
-{
+void timer() {
     pthread_t min_thread, max_thread, first_thread;
-
     pthread_mutex_lock(&mid);
-    if (flag == 1)
-    {
-        // latest_take_time = 현재시간
-
-        pthread_mutex_lock(&mid); // 뮤텍스 잠금
+    if (flag == 1) {
         flag = 0;
-        pthread_mutex_unlock(&mid); // 뮤텍스 잠금 해제
-        // 모터 작동
         today_count++;
-        total_count++; // 복용 횟수 추가
-
-        if (today_count < max_count) // 하루 복용횟수 안 채움
-        {
+        total_count++;
+        printf("복용 완료, 오늘 복용 횟수: %d\n", today_count);
+        if (today_count < max_count) {
             pthread_create(&min_thread, NULL, take_min, NULL);
             pthread_create(&max_thread, NULL, take_max, NULL);
-
             pthread_detach(min_thread);
-            pthread_detach(max_thread); // 자동 회수
-        }
-
-        else // 하루 복용횟수 채움
-        {
-            today_count = 0;                                       // 하루 복용 횟수 다 채워서 초기화
-            pthread_create(&first_thread, NULL, first_take, NULL); // 첫 복용 쓰레드 시작
+            pthread_detach(max_thread);
+        } else {
+            today_count = 0;
+            pthread_create(&first_thread, NULL, first_take, NULL);
             pthread_detach(first_thread);
         }
     }
     pthread_mutex_unlock(&mid);
-
-    return 0;
 }
 
-int main()
-{
+// NFC 감지 함수
+int nfc_detect() {
+    pid_t pid;
+    int status;
+    char *argv[] = {"nfc-poll", NULL};
+    char detected_data[100];
+
+    printf("NFC 감지 중...\n");
+    if (posix_spawn(&pid, "/bin/nfc-poll", NULL, NULL, argv, environ) != 0) {
+        perror("nfc-poll 실행 실패");
+        return 0;
+    }
+
+    if (waitpid(pid, &status, 0) < 0) {
+        perror("nfc-poll 대기 실패");
+        return 0;
+    }
+
+    // 예제: NFC 데이터 수집 (여기선 시뮬레이션)
+    FILE *file = popen("/bin/nfc-poll | grep 'UID' | awk '{print $3}'", "r");
+    if (file) {
+        fgets(detected_data, sizeof(detected_data), file);
+        pclose(file);
+        detected_data[strcspn(detected_data, "\n")] = '\0'; // 개행 제거
+    }
+
+    // 감지된 데이터 확인
+    if (strlen(detected_data) > 0) {
+        strcpy(nfc_detected_data, detected_data);
+        printf("NFC 데이터 감지됨: %s\n", nfc_detected_data);
+        return 1;
+    } else {
+        printf("NFC 태그를 감지하지 못했습니다.\n");
+        return 0;
+    }
+}
+
+int main() {
     wiringPiSetupGpio();
     pthread_mutex_init(&mid, NULL);
 
-    while (1)
-    {
-        // if 태그 성공
-        timer();
-        delay(200); // 0.2s대기 (과부하 방지)
+    printf("프로그램 시작\n");
+
+    while (1) {
+        if (nfc_detect()) {
+            printf("NFC 감지 성공: %s\n", nfc_detected_data);
+            timer();
+        }
+        sleep(1); // CPU 과부하 방지
     }
 
     pthread_mutex_destroy(&mid);
