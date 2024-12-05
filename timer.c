@@ -25,6 +25,66 @@ pthread_mutex_t mid;
 // NFC 태그 인식 결과 변수
 char nfc_detected_data[100] = "";
 
+// 스텝모터 gpio
+// gpio 12, 16, 20, 21
+int pin_arr[4] = {12, 16, 20, 21};
+
+int one_phase[8][4] = {
+    {1, 0, 0, 0},
+    {1, 1, 0, 0},
+    {0, 1, 0, 0},
+    {0, 1, 1, 0},
+    {0, 0, 1, 0},
+    {0, 0, 1, 1},
+    {0, 0, 0, 1},
+    {1, 0, 0, 1},
+};
+
+void one_two_Phase_Rotate(int steps, int dir)
+{
+    if (dir == 1)
+    {
+        for (int i = 0; i < steps; i++)
+        {
+            digitalWrite(pin_arr[0], one_phase[i % 8][0]);
+            digitalWrite(pin_arr[1], one_phase[i % 8][1]);
+            digitalWrite(pin_arr[2], one_phase[i % 8][2]);
+            digitalWrite(pin_arr[3], one_phase[i % 8][3]);
+            delay(2);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < steps; i++)
+        {
+            digitalWrite(pin_arr[0], one_phase[i % 8][3]);
+            digitalWrite(pin_arr[1], one_phase[i % 8][2]);
+            digitalWrite(pin_arr[2], one_phase[i % 8][1]);
+            digitalWrite(pin_arr[3], one_phase[i % 8][0]);
+            delay(2);
+        }
+    }
+}
+
+void one_two_Phase_Rotate_Angle(float angle, int dir)
+{
+    // 4096 이 한바퀴 1-2상 기준
+    int steps = angle * (4096 / 360);
+
+    one_two_Phase_Rotate(steps, dir);
+}
+
+void init_Step()
+{
+    // 4
+    for (int i = 0; i < 4; i++)
+    {
+        pinMode(pin_arr[i], OUTPUT);
+    }
+}
+//////////////////////////////////////////////////////////////
+
+
 // 타이머 함수들
 void *take_min(void *arg) {
     sleep(min_time);
@@ -68,12 +128,17 @@ void timer() {
     pthread_mutex_lock(&mid);
     if (flag == 1) {
         flag = 0;
+
+        //스텝모터 작동(시계방향, 8칸 => 45도)
+        one_two_Phase_Rotate_Angle(45, 0);
+
         today_count++;
         total_count++;
         printf("복용 완료, 오늘 복용 횟수: %d\n", today_count);
         if (today_count < max_count) {
             pthread_create(&min_thread, NULL, take_min, NULL);
             pthread_create(&max_thread, NULL, take_max, NULL);
+
             pthread_detach(min_thread);
             pthread_detach(max_thread);
         } else {
@@ -127,6 +192,9 @@ int main() {
     pthread_mutex_init(&mid, NULL);
 
     printf("프로그램 시작\n");
+
+    //스텝모터 gpio 설정
+    init_Step();
 
     while (1) {
         if (nfc_detect()) {
