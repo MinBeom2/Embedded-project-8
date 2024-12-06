@@ -15,12 +15,12 @@ extern char **environ;
 int min_time = 10;  // 최소 대기 시간 (초 단위 예제용)
 int max_time = 60;  // 최대 대기 시간 (초 단위 예제용)
 int first_time = 9; // 첫 복용 시간 (24시간 형식)
-int max_count = 3;  // 하루 복용 횟수 제한
+int max_count = 100;  // 하루 복용 횟수 제한
 
 // 상태 변수들
 int today_count = 0;
 int total_count = 0;
-int flag = 0; // 공유 자원 약 복용 가능 여부 1: 가능 0: 불가능
+int flag = 1; // 공유 자원 약 복용 가능 여부 1: 가능 0: 불가능
 pthread_mutex_t mid;
 
 // NFC 태그 인식 결과 변수
@@ -154,6 +154,7 @@ void timer()
 
         // 스텝모터 작동(시계방향, 8칸 => 45도)
         one_two_Phase_Rotate_Angle(45, 0);
+        printf("스텝모터 동작\n");
 
         today_count++;
         total_count++;
@@ -175,7 +176,7 @@ void timer()
     }
     else
     {
-        printf("하루 복용 횟수 초과");
+        printf("하루 복용 횟수 초과\n");
         music(18);
     }
     pthread_mutex_unlock(&mid);
@@ -190,37 +191,13 @@ int nfc_detect()
     char detected_data[100];
 
     printf("NFC 감지 중...\n");
-    if (posix_spawn(&pid, "/bin/nfc-poll", NULL, NULL, argv, environ) != 0)
-    {
+    if (posix_spawn(&pid, "/bin/nfc-poll", NULL, NULL, argv, environ) != 0) {
         perror("nfc-poll 실행 실패");
         return 0;
     }
 
-    if (waitpid(pid, &status, 0) < 0)
-    {
+    if (waitpid(pid, &status, 0) < 0) {
         perror("nfc-poll 대기 실패");
-        return 0;
-    }
-
-    // 예제: NFC 데이터 수집 (여기선 시뮬레이션)
-    FILE *file = popen("/bin/nfc-poll | grep 'UID' | awk '{print $3}'", "r");
-    if (file)
-    {
-        fgets(detected_data, sizeof(detected_data), file);
-        pclose(file);
-        detected_data[strcspn(detected_data, "\n")] = '\0'; // 개행 제거
-    }
-
-    // 감지된 데이터 확인
-    if (strlen(detected_data) > 0)
-    {
-        strcpy(nfc_detected_data, detected_data);
-        printf("NFC 데이터 감지됨: %s\n", nfc_detected_data);
-        return 1;
-    }
-    else
-    {
-        printf("NFC 태그를 감지하지 못했습니다.\n");
         return 0;
     }
 }
