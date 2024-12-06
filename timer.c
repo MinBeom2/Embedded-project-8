@@ -115,7 +115,7 @@ void *take_max(void *arg)
     if (flag == 1)
     {
         printf("알림: 최대 대기 시간 도달\n");
-        // 변수 gpio번호 music(18);
+        music(18);
     }
     pthread_mutex_unlock(&mid);
     return NULL;
@@ -136,7 +136,7 @@ void *first_take(void *arg)
         if (current_time->tm_sec == first_time && flag == 0)
         {
             printf("알림: 하루 첫 복용 마감\n");
-            // 변수 gpio번호 music(18);
+            music(18);
         }
         pthread_mutex_unlock(&mid);
         sleep(1);
@@ -176,7 +176,7 @@ void timer()
     else
     {
         printf("하루 복용 횟수 초과");
-        // 변수 gpio번호 music(18);
+        music(18);
     }
     pthread_mutex_unlock(&mid);
 }
