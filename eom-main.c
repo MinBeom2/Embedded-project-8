@@ -11,12 +11,14 @@
 
 #define BAUD_RATE 115200
 
-// 타이머 카운터 전역 변수 
-#define DAY_TIME 50 //카운트 초기화 시간 30s ..데모라 하루를 30초로 변경함
-#define MAX_COUNT 3
-#define INTERVAL_TIME 10 // 약 복용 간격
+// 타이머 카운터 전역 변수
+#define DAY_TIME 30 // 하루 초기화 시간 (데모용 30초)
+#define MAX_COUNT 3 // 하루 약 복용 횟수
+#define INTERVAL_TIME 1 // 약 복용 간격 (초)
 
-int m_count = 0;
+int m_count = 0;          // 복용 횟수
+time_t last_dose_time;    // 마지막 복용 시간
+time_t start_day_time;    // 하루 시작 시간
 
 // 플래그 및 mutex
 int nfc_flag = 0;
@@ -38,18 +40,15 @@ int one_phase[8][4] = {
     {1, 0, 0, 1},
 };
 
-void music(int gpio)
-{
+void music(int gpio) {
     softToneCreate(gpio);
-    for (int i = 0; i < 3; i++)
-    {
+    for (int i = 0; i < 3; i++) {
         softToneWrite(gpio, 900);
         delay(333);
         softToneWrite(gpio, 0);
         delay(333);
     }
 }
-
 
 // 문자열 전송 함수
 void send_message(int fd, const char* msg) {
@@ -70,7 +69,7 @@ void one_two_Phase_Rotate_Angle(float angle, int dir) {
     }
 }
 
-// 블루투스 입력 함수
+//휴대폰(블루투스 장치)로 비밀번호 pi에 전송
 int bluetooth_input(int fd) {
     char buffer[100]; // 비밀번호 입력 버퍼
     int index = 0;    // 버퍼 인덱스 초기화
@@ -79,24 +78,22 @@ int bluetooth_input(int fd) {
     // 비밀번호 입력 안내 메시지 전송
     send_message(fd, "비밀번호를 입력해주세요");
 
-    memset(buffer, '\0', sizeof(buffer)); // 버퍼 명시적으로 초기화
+    memset(buffer, '\0', sizeof(buffer)); // 버퍼 초기화
 
     while (1) {
         if (serialDataAvail(fd)) {
             dat = serialGetchar(fd);
-            if (dat == '\n' || dat == '\r') { // 줄바꿈 문자로 입력 완료 확인
+            if (dat == '\n' || dat == '\r') { 
                 buffer[index] = '\0'; // 문자열 종료
-                if (strcmp(buffer, "1234") == 0) { // 비밀번호 검증
+                if (strcmp(buffer, "1234") == 0) { // 비밀번호
                     printf("블루투스 입력 성공\n");
                     return 1; // 성공
-                }
-                else {
+                } else {
                     printf("비밀번호 입력\n");
-                    memset(buffer, '\0', sizeof(buffer)); // 잘못된 입력 후 버퍼 초기화
+                    memset(buffer, '\0', sizeof(buffer)); //버퍼 초기화
                     index = 0; // 인덱스 초기화
                 }
-            }
-            else {
+            } else {
                 if (index < sizeof(buffer) - 1) { // 버퍼 오버플로 방지
                     buffer[index++] = dat;
                 }
@@ -107,7 +104,26 @@ int bluetooth_input(int fd) {
     return 0; // 실패
 }
 
-// NFC 감지 스레드
+// 하루 초기화 스레드
+void* daily_reset_task(void* arg) {
+    int fd = *(int*)arg;
+    while (1) {
+        sleep(1); // 1초 주기로 확인
+        pthread_mutex_lock(&flag_mutex);
+        time_t now = time(NULL);
+        if (difftime(now, start_day_time) >= DAY_TIME) {
+            printf("하루가 지나 복용 횟수를 초기화합니다.\n");
+            send_message(fd, "하루가 지나 복용 횟수를 초기화합니다.");
+            m_count = 0;
+            start_day_time = now; // 하루 시작 시간 재설정
+            //music(18) 초기화시 부저 울릴건지 ?
+        }
+        pthread_mutex_unlock(&flag_mutex);
+    }
+    return NULL;
+}
+
+// NFC 감지 스레드에서 약 복용 횟수와 남은 시간 전달
 void* nfc_task(void* arg) {
     pid_t pid;
     int status;
@@ -125,29 +141,61 @@ void* nfc_task(void* arg) {
                     nfc_flag = 1; // NFC 인증 성공
                     pthread_mutex_unlock(&flag_mutex);
                     printf("NFC 인증 성공\n");
-                    //////// 타이머 넣기
-                    if(m_count < MAX_COUNT){
-                        // NFC 인증 성공 후 블루투스 입력 호출
+
+                    time_t now = time(NULL);
+
+                    // 복용 간격 및 복용 횟수 확인
+                    pthread_mutex_lock(&flag_mutex);
+                    if (m_count >= MAX_COUNT) {
+                        printf("하루 약 복용 횟수를 초과했습니다.\n");
+                        send_message(fd, "복용 횟수를 초과했습니다.");
+                        music(18);
+                        nfc_flag = 0;
+                        pthread_mutex_unlock(&flag_mutex);
+                        continue;
+                    } else if (difftime(now, last_dose_time) < INTERVAL_TIME) {
+                        int remaining = INTERVAL_TIME - (int)difftime(now, last_dose_time);
+                        printf("복용 간격 충족되지 않음: %d초 남음.\n", remaining);
+
+                        // 남은 시간 블루투스 전송
+                        char message[100];
+                        sprintf(message, "복용 간격 충족되지 않음: %d초 남음.", remaining);
+                        send_message(fd, message);
+
+                        music(18);
+                        nfc_flag = 0;
+                        pthread_mutex_unlock(&flag_mutex);
+                        continue;
+                    } else {
+                        pthread_mutex_unlock(&flag_mutex);
+
+                        // NFC 인증 성공 후 블루투스 입력 
                         if (bluetooth_input(fd)) {
                             printf("조건 충족: 모터 작동 시작\n");
                             one_two_Phase_Rotate_Angle(45, 1); // 스텝모터 45도 회전
-                            printf("약 복용 횟수 %d\n", ++m_count);
+
+                            pthread_mutex_lock(&flag_mutex);
+                            m_count++;               // 복용 횟수 증가
+                            last_dose_time = now;    // 마지막 복용 시간 갱신
+
+                            // 약 복용 횟수와 상태 전송
+                            char message[100];
+                            sprintf(message, "복용 완료. 현재 복용 횟수: %d/%d", m_count, MAX_COUNT);
+                            send_message(fd, message);
+
+                            printf("약 복용 횟수 %d\n", m_count);
+                            pthread_mutex_unlock(&flag_mutex);
                         }
                     }
-                    else{
-                        printf("하루 약 복용 횟수를 초과했습니다.\n");
-                        music(18);
-                    }
+
                     pthread_mutex_lock(&flag_mutex);
                     nfc_flag = 0; // NFC 플래그 초기화 (다시 감지 가능)
                     pthread_mutex_unlock(&flag_mutex);
                 }
-            }
-            else {
+            } else {
                 perror("nfc-poll 실행 실패");
             }
-        }
-        else {
+        } else {
             pthread_mutex_unlock(&flag_mutex);
         }
         sleep(1); // NFC 감지 주기
@@ -171,11 +219,19 @@ int main() {
         pinMode(pin_arr[i], OUTPUT);
     }
 
-    pthread_t nfc_thread;
+    // 초기화
+    start_day_time = time(NULL);
+    last_dose_time = time(NULL) - INTERVAL_TIME; // 즉시 복용 가능
+
+    pthread_t nfc_thread, reset_thread;
+
+    // 하루 초기화 스레드
+    pthread_create(&reset_thread, NULL, daily_reset_task, &fd_serial);
 
     // NFC 처리 스레드
     pthread_create(&nfc_thread, NULL, nfc_task, &fd_serial);
 
+    pthread_join(reset_thread, NULL);
     pthread_join(nfc_thread, NULL);
 
     pthread_mutex_destroy(&flag_mutex);
