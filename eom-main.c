@@ -1,9 +1,3 @@
-/*
-기존에 있던 타이머 기능 매칭이 잘 안돼서 다 빼고 새로 이식했습니다.
-
-타이머랑 복용 카운트 조건식에 잘 적용해서 넣으면 될 듯 한데 이건 차차 하겠습니다.
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -17,15 +11,18 @@
 
 #define BAUD_RATE 115200
 
-// 타이머 전역 변수 
-int max_count = 3;
-int max_time = 10;
+// 타이머 카운터 전역 변수 
+#define DAY_TIME 50 //카운트 초기화 시간 30s ..데모라 하루를 30초로 변경함
+#define MAX_COUNT 3
+#define INTERVAL_TIME 10 // 약 복용 간격
+
+int m_count = 0;
 
 // 플래그 및 mutex
 int nfc_flag = 0;
 pthread_mutex_t flag_mutex;
 
-static const char* UART2_DEV = "/dev/ttyAMA0"; // UART2
+static const char* UART_DEV = "/dev/ttyAMA0"; // UART0
 extern char** environ;
 
 // 스텝모터 관련 GPIO 및 설정
@@ -40,6 +37,19 @@ int one_phase[8][4] = {
     {0, 0, 0, 1},
     {1, 0, 0, 1},
 };
+
+void music(int gpio)
+{
+    softToneCreate(gpio);
+    for (int i = 0; i < 3; i++)
+    {
+        softToneWrite(gpio, 900);
+        delay(333);
+        softToneWrite(gpio, 0);
+        delay(333);
+    }
+}
+
 
 // 문자열 전송 함수
 void send_message(int fd, const char* msg) {
@@ -62,10 +72,11 @@ void one_two_Phase_Rotate_Angle(float angle, int dir) {
 
 // 블루투스 입력 함수
 int bluetooth_input(int fd) {
-    char buffer[100];
-    int index = 0;    
+    char buffer[100]; // 비밀번호 입력 버퍼
+    int index = 0;    // 버퍼 인덱스 초기화
     char dat;
 
+    // 비밀번호 입력 안내 메시지 전송
     send_message(fd, "비밀번호를 입력해주세요");
 
     memset(buffer, '\0', sizeof(buffer)); // 버퍼 명시적으로 초기화
@@ -73,7 +84,7 @@ int bluetooth_input(int fd) {
     while (1) {
         if (serialDataAvail(fd)) {
             dat = serialGetchar(fd);
-            if (dat == '\n' || dat == '\r') { // 줄바꿈 문자
+            if (dat == '\n' || dat == '\r') { // 줄바꿈 문자로 입력 완료 확인
                 buffer[index] = '\0'; // 문자열 종료
                 if (strcmp(buffer, "1234") == 0) { // 비밀번호 검증
                     printf("블루투스 입력 성공\n");
@@ -81,7 +92,7 @@ int bluetooth_input(int fd) {
                 }
                 else {
                     printf("비밀번호 입력\n");
-                    memset(buffer, '\0', sizeof(buffer)); // 버퍼 초기화
+                    memset(buffer, '\0', sizeof(buffer)); // 잘못된 입력 후 버퍼 초기화
                     index = 0; // 인덱스 초기화
                 }
             }
@@ -114,16 +125,21 @@ void* nfc_task(void* arg) {
                     nfc_flag = 1; // NFC 인증 성공
                     pthread_mutex_unlock(&flag_mutex);
                     printf("NFC 인증 성공\n");
-
-                    // NFC 인증 성공 후 블루투스 입력 호출
-                    if (bluetooth_input(fd)) {
-                        printf("조건 충족: 모터 작동 시작\n");
-                        one_two_Phase_Rotate_Angle(45, 1); // 스텝모터 45도 회전
-                        printf("작업 완료: 새로운 NFC 입력 대기...\n");
+                    //////// 타이머 넣기
+                    if(m_count < MAX_COUNT){
+                        // NFC 인증 성공 후 블루투스 입력 호출
+                        if (bluetooth_input(fd)) {
+                            printf("조건 충족: 모터 작동 시작\n");
+                            one_two_Phase_Rotate_Angle(45, 1); // 스텝모터 45도 회전
+                            printf("약 복용 횟수 %d\n", ++m_count);
+                        }
                     }
-
+                    else{
+                        printf("하루 약 복용 횟수를 초과했습니다.\n");
+                        music(18);
+                    }
                     pthread_mutex_lock(&flag_mutex);
-                    nfc_flag = 0; 
+                    nfc_flag = 0; // NFC 플래그 초기화 (다시 감지 가능)
                     pthread_mutex_unlock(&flag_mutex);
                 }
             }
@@ -139,24 +155,11 @@ void* nfc_task(void* arg) {
     return NULL;
 }
 
-//아직 덜함 이거
-void music(int gpio)
-{
-    softToneCreate(gpio);
-    for (int i = 0; i < 3; i++)
-    {
-        softToneWrite(gpio, 900);
-        delay(333);
-        softToneWrite(gpio, 0);
-        delay(333);
-    }
-}
-
 int main() {
     int fd_serial;
 
     if (wiringPiSetupGpio() < 0) return 1;
-    if ((fd_serial = serialOpen(UART2_DEV, BAUD_RATE)) < 0) {
+    if ((fd_serial = serialOpen(UART_DEV, BAUD_RATE)) < 0) {
         printf("UART 초기화 실패\n");
         return 1;
     }
@@ -179,5 +182,3 @@ int main() {
     serialClose(fd_serial);
     return 0;
 }
-
-
