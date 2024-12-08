@@ -10,15 +10,19 @@
 #include <wiringSerial.h>
 
 #define BAUD_RATE 115200
+#define BUTTON_GPIO 17 //gpio 17번 핀 스위치
+#define PWM0 13 //서보모터
 
 // 타이머 카운터 전역 변수
-#define DAY_TIME 30 // 하루 초기화 시간 (데모용 30초)
+#define DAY_TIME 50 // 하루 초기화 시간 (데모용 30초)
 #define MAX_COUNT 3 // 하루 약 복용 횟수
-#define INTERVAL_TIME 1 // 약 복용 간격 (초)
+#define INTERVAL_TIME 10 // 약 복용 간격 (초)
 
 int m_count = 0;          // 복용 횟수
 time_t last_dose_time;    // 마지막 복용 시간
 time_t start_day_time;    // 하루 시작 시간
+
+int isclose = 1;
 
 // 플래그 및 mutex
 int nfc_flag = 0;
@@ -86,9 +90,12 @@ int bluetooth_input(int fd) {
             if (dat == '\n' || dat == '\r') { 
                 buffer[index] = '\0'; // 문자열 종료
                 if (strcmp(buffer, "1234") == 0) { // 비밀번호
-                    printf("블루투스 입력 성공\n");
                     return 1; // 성공
-                } else {
+                }
+                else if(strcmp(buffer, "9999") == 0){
+                    return 2;
+                }
+                else {
                     printf("비밀번호 입력\n");
                     memset(buffer, '\0', sizeof(buffer)); //버퍼 초기화
                     index = 0; // 인덱스 초기화
@@ -170,7 +177,8 @@ void* nfc_task(void* arg) {
                         pthread_mutex_unlock(&flag_mutex);
 
                         // NFC 인증 성공 후 블루투스 입력 
-                        if (bluetooth_input(fd)) {
+                        if (bluetooth_input(fd) == 1) {
+                            printf("비밀번호 입력 성공\n");
                             printf("조건 충족: 모터 작동 시작\n");
                             one_two_Phase_Rotate_Angle(45, 1); // 스텝모터 45도 회전
 
@@ -203,6 +211,53 @@ void* nfc_task(void* arg) {
     return NULL;
 }
 
+//서보 모터
+void rotate_Servo(float angle){
+    // printf("%d", angle);
+    float duty = 150 + (angle / 90) * 100;  //2.5% 7.5% 12.5%
+
+    pwmWrite(PWM0, (int)duty);
+}
+
+
+//버튼 입력 스레드
+void* button_task(void* arg) {
+    int fd = *(int*)arg;
+    // 버튼 GPIO 핀 설정
+    pinMode(BUTTON_GPIO, INPUT);
+    pullUpDnControl(BUTTON_GPIO, PUD_UP);
+
+    while (1) {
+        if (digitalRead(BUTTON_GPIO) == LOW) { // 버튼 눌림
+            if(isclose == 0){
+                rotate_Servo(0.0);
+                printf("뚜껑 닫기\n");
+                send_message(fd, "뚜겅을 닫습니다.");
+                //그냥 닫기
+                isclose = 1;
+            }
+            else{
+                printf("<관리자 인증>\n");
+                if(bluetooth_input(fd) == 2){
+                    printf("관리자 인증 성공!\n");
+                    send_message(fd, "관리자 인증 성공!");
+                    //열기
+                    rotate_Servo(90.0);
+                    isclose = 0;
+                }
+            }
+
+            while (digitalRead(BUTTON_GPIO) == LOW) {
+                // 버튼이 계속 눌려있으면 중복 출력 방지
+                delay(10);
+            }
+        }
+        delay(100); // 버튼 상태 확인 주기
+    }
+    return NULL;
+}
+
+
 int main() {
     int fd_serial;
 
@@ -211,6 +266,13 @@ int main() {
         printf("UART 초기화 실패\n");
         return 1;
     }
+    pinMode(PWM0, PWM_OUTPUT); 
+    pwmSetMode(PWM_MODE_MS);
+    pwmSetClock(192);
+    pwmSetRange(2000);
+
+    //서보모터 초기화
+    pwmWrite(PWM0, 150);
 
     pthread_mutex_init(&flag_mutex, NULL);
 
@@ -223,7 +285,10 @@ int main() {
     start_day_time = time(NULL);
     last_dose_time = time(NULL) - INTERVAL_TIME; // 즉시 복용 가능
 
-    pthread_t nfc_thread, reset_thread;
+    pthread_t nfc_thread, reset_thread, button_thread;
+
+    // 버튼 스레드
+    pthread_create(&button_thread, NULL, button_task, &fd_serial);
 
     // 하루 초기화 스레드
     pthread_create(&reset_thread, NULL, daily_reset_task, &fd_serial);
@@ -233,6 +298,7 @@ int main() {
 
     pthread_join(reset_thread, NULL);
     pthread_join(nfc_thread, NULL);
+    pthread_join(button_thread, NULL);
 
     pthread_mutex_destroy(&flag_mutex);
     serialClose(fd_serial);
