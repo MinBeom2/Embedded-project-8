@@ -90,17 +90,15 @@ int bluetooth_input(int fd) {
             if (dat == '\n' || dat == '\r') { 
                 buffer[index] = '\0'; // 문자열 종료
                 if (strcmp(buffer, "1234") == 0) { // 비밀번호
+                    memset(buffer, '\0', sizeof(buffer)); //버퍼 초기화
+                    index = 0; // 인덱스 초기화                    
                     return 1; // 성공
                 }
                 else if(strcmp(buffer, "9999") == 0){
+                    memset(buffer, '\0', sizeof(buffer)); //버퍼 초기화
+                    index = 0; // 인덱스 초기화
                     return 2;
                 }
-                    //추가 예정
-                // else if(strcmp(buffer, "1234") == 0 || strcmp(buffer, "9999"){
-                //     memset(buffer, '\0', sizeof(buffer)); //버퍼 초기화
-                //     index = 0; // 인덱스 초기화
-                //     return 3;
-                // }
                 else {
                     printf("비밀번호 입력\n");
                     memset(buffer, '\0', sizeof(buffer)); //버퍼 초기화
@@ -114,7 +112,8 @@ int bluetooth_input(int fd) {
         }
         delay(10);
     }
-    return 0; // 실패
+
+    return 3; // 실패
 }
 
 // 하루 초기화 스레드
@@ -199,13 +198,13 @@ void* nfc_task(void* arg) {
                             printf("약 복용 횟수 %d\n", m_count);
                             pthread_mutex_unlock(&flag_mutex);
                         }
-                        // else{
-                        //     printf("비밀번호가 틀렸습니다. 다시 시도해주세요.\n");
-                        //     send_message(fd, "비밀번호가 틀렸습니다. 다시 시도해주세요.");
-                        //     music(18);
-                        //     nfc_flag = 0;
-                        //     pthread_mutex_unlock(&flag_mutex);
-                        // }
+                        else{
+                            printf("비밀번호가 틀렸습니다. 다시 시도해주세요.\n");
+                            send_message(fd, "비밀번호가 틀렸습니다. 다시 시도해주세요.");
+                            music(18);
+                            nfc_flag = 0;
+                            pthread_mutex_unlock(&flag_mutex);
+                        }
                     }
 
                     pthread_mutex_lock(&flag_mutex);
@@ -250,18 +249,19 @@ void* button_task(void* arg) {
             }
             else{
                 printf("<관리자 인증>\n");
-                if(bluetooth_input(fd) == 2){
+                int bt = bluetooth_input(fd);
+                if(bt == 2){
                     printf("관리자 인증 성공!\n");
                     send_message(fd, "관리자 인증 성공!");
                     //열기
                     rotate_Servo(90.0);
                     isclose = 0;
                 }
-                // else if (bluetooth_input(fd) == 3){
-                //     printf("비밀번호가 틀렸습니다.\n");
-                //     send_message(fd, "비밀번호가 틀렸습니다.");
-                //     musisc(18);
-                // }
+                else if (bt == 3){
+                    printf("비밀번호가 틀렸습니다.\n");
+                    send_message(fd, "비밀번호가 틀렸습니다.");
+                    music(18);
+                }
             }
 
             while (digitalRead(BUTTON_GPIO) == LOW) {
