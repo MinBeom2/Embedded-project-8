@@ -240,24 +240,24 @@ void* button_task(void* arg) {
 
     while (1) {
         if (digitalRead(BUTTON_GPIO) == LOW) { // 버튼 눌림
-            if(isclose == 0){
+            pthread_mutex_lock(&flag_mutex);
+            nfc_flag = 0; // NFC 인증 플래그 초기화
+            pthread_mutex_unlock(&flag_mutex);
+
+            if (isclose == 0) {
                 rotate_Servo(0.0);
                 printf("뚜껑 닫기\n");
-                send_message(fd, "뚜겅을 닫습니다.");
-                //그냥 닫기
+                send_message(fd, "뚜껑을 닫습니다.");
                 isclose = 1;
-            }
-            else{
+            } else {
                 printf("<관리자 인증>\n");
                 int bt = bluetooth_input(fd);
-                if(bt == 2){
+                if (bt == 2) {
                     printf("관리자 인증 성공!\n");
                     send_message(fd, "관리자 인증 성공!");
-                    //열기
-                    rotate_Servo(90.0);
+                    rotate_Servo(90.0); // 열기
                     isclose = 0;
-                }
-                else if (bt == 3){
+                } else {
                     printf("비밀번호가 틀렸습니다.\n");
                     send_message(fd, "비밀번호가 틀렸습니다.");
                     music(18);
