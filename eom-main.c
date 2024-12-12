@@ -240,42 +240,27 @@ void* button_task(void* arg) {
 
     while (1) {
         if (digitalRead(BUTTON_GPIO) == LOW) { // 버튼 눌림
-            if (wait_for_password) {
-                // 비밀번호 입력 대기 상태 처리
+            if(isclose == 0){
+                rotate_Servo(0.0);
+                printf("뚜껑 닫기\n");
+                send_message(fd, "뚜겅을 닫습니다.");
+                //그냥 닫기
+                isclose = 1;
+            }
+            else{
                 printf("<관리자 인증>\n");
                 int bt = bluetooth_input(fd);
-                if (bt == 2) {
+                if(bt == 2){
                     printf("관리자 인증 성공!\n");
                     send_message(fd, "관리자 인증 성공!");
-                    rotate_Servo(90.0); // 열기
+                    //열기
+                    rotate_Servo(90.0);
                     isclose = 0;
-                    wait_for_password = 0; // 대기 상태 종료
-                } else {
+                }
+                else if (bt == 3){
                     printf("비밀번호가 틀렸습니다.\n");
                     send_message(fd, "비밀번호가 틀렸습니다.");
                     music(18);
-                }
-            } else {
-                // 일반 버튼 동작 처리
-                if (isclose == 0) {
-                    rotate_Servo(0.0);
-                    printf("뚜껑 닫기\n");
-                    send_message(fd, "뚜껑을 닫습니다.");
-                    isclose = 1;
-                } else {
-                    printf("<관리자 인증>\n");
-                    int bt = bluetooth_input(fd);
-                    if (bt == 2) {
-                        printf("관리자 인증 성공!\n");
-                        send_message(fd, "관리자 인증 성공!");
-                        rotate_Servo(90.0); // 열기
-                        isclose = 0;
-                    } else {
-                        printf("비밀번호가 틀렸습니다.\n");
-                        send_message(fd, "비밀번호가 틀렸습니다.");
-                        music(18);
-                        wait_for_password = 1; // 비밀번호 입력 대기 상태로 전환
-                    }
                 }
             }
 
@@ -336,3 +321,8 @@ int main() {
     serialClose(fd_serial);
     return 0;
 }
+
+
+버튼 한 번 누르고 비밀번호 입력 후 다시 버튼 눌러서 닫고
+다시 버튼 누르면 비밀번호를 안쳤는데도 비밀번호가 틀렸다고해
+수정한 부분만 코드 보여줘
