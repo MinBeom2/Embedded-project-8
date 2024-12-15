@@ -16,6 +16,10 @@
 
  ## 2. 아이디어 소개
 
+ ![image](https://github.com/user-attachments/assets/a6e68c0c-5604-44af-b1b0-1d457e180f8d)
+![화면 캡처 2024-12-15 220040](https://github.com/user-attachments/assets/8871bc2b-1794-4ee6-93b5-66208922ba46)
+
+
 **<관리자>**
 - 버튼과 블루투스 통신으로 서보모터를 제어하여 디스펜서 잠금 기능
 - 잠금상태 및 비밀번호 입력 메시지 전송
@@ -33,7 +37,7 @@
 
 ## 4. 전체 시스템 구조
 
-![시스템 구조](https://github.com/user-attachments/assets/c2943308-21a5-4749-ac8c-2882677fa64f)
+![시스템 구조](https://github.com/user-attachments/assets/70b8c81c-8756-4955-b6cf-1b5af71074db)
 
 
 ## 5. 시스템 흐름도
